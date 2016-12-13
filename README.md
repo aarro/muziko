@@ -1,4 +1,4 @@
-# spotigram
+# muziko
 A telegram bot to add song links to spotify playlists. 
 
 ### Functional
