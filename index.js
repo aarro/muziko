@@ -116,21 +116,21 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
 
       var promise = new Promise(function (res, ref) {
         if (v.playlistId)
-          res();
+          res(v.playlistId);
         else {
           searchForUserPlaylist(v.id, name)
             .then(function (p) {
               if (p) {
                 v.playlistId = p.id;
-                res();
+                res(v.playlistId);
               } else {
                 spotifyApi.createPlaylist(v.id, name, { 'public': false })
                   .then(function (d) {
                     v.playlistId = d.body.id;
-                    res();
+                    res(v.playlistId);
                   }, function (err) {
                     console.log('Something went wrong!', err);
-                    rej();
+                    rej(err);
                   });
               }
             });
@@ -138,7 +138,7 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
       });
 
       promise
-        .then(function () {
+        .then(function (pid) {
           if (v.playlistId) {
             spotifyApi.addTracksToPlaylist(v.id, v.playlistId, ["spotify:track:" + tid])
               .then(function (data) {
