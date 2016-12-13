@@ -14,7 +14,7 @@ var spotifyStateMap = [];
 var spotifyApi = new SpotifyWebApi({
   clientId: process.env.spotify_clientId,
   clientSecret: process.env.spotify_clientSecret,
-  redirectUri: process.env.baseUrl + ':' + process.env.PORT + appSpotifyCallback
+  redirectUri: process.env.baseUrl + appSpotifyCallback
 });
 
 app.set('port', (process.env.PORT));
@@ -151,7 +151,7 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
     });
   }
   else {
-    bot.sendMessage(id, 'I\'m sorry but no one in this chat seems to be regisitered');
+    bot.sendMessage(id, 'I\'m sorry but no one in this chat seems to be registered');
   }
 });
 
@@ -161,6 +161,6 @@ bot.onText(/\/auth/, function (msg, match) {
   var a = spotifyApi.createAuthorizeURL(spotifyScopes, u);// + '&show_dialog=true';
   spotifyStateMap.push({ 'u': u, 'id': msg.chat.id });
   TinyURL.shorten(a, function (res) {
-    bot.sendMessage(msg.chat.id, "Please visit the following link to associated your spotify account. " + res);
+    bot.sendMessage(msg.chat.id, "Please visit the following link to associate your spotify account. " + res);
   });
 });
