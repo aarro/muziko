@@ -131,6 +131,8 @@ function searchForUserPlaylist(userId, playlistName) {
           console.log('Failed to find existing playlist for user. User=' + userId);
           return new Promise(function (res) { res(undefined); });
         }
+      }, function (err) {
+        return new Promise(function (res, rej) { rej(err); });
       });
   }
 
@@ -139,25 +141,29 @@ function searchForUserPlaylist(userId, playlistName) {
 
 function getPlaylistForChatAndUser(user, name) {
   if (user.playlistId) {
-    console.log('chat.title=' + name + ' user=' + user.id + ' already had playlist= ' + user.playlistId + 'cached for the track=' + tid);
+    console.log('chat.title=' + name + ' user=' + user.id + ' already had playlist= ' + user.playlistId + 'cached.');
     return new Promise(function (res) { res(user.playlistId); });
   } else {
     return searchForUserPlaylist(user.id, name)
       .then(function (p) {
         if (p) {
           user.playlistId = p.id;
+          console.log('Routing found playlist id out of getPlaylistForChatAndUser. user=' + user.id + ' | playlist=' + user.playlistId);
           return new Promise(function (res) { res(user.playlistId); });
         } else {
+          console.log('Creating a playlist for User=' + user.id);
           return spotifyApi.createPlaylist(user.id, name, { 'public': false })
             .then(function (d) {
               user.playlistId = d.body.id;
-              console.log('chat.title=' + name + ' user=' + v.id + ' created playlist=' + v.playlistId + ' for the track=' + tid);
+              console.log('chat.title=' + name + ' user=' + user.id + ' created playlist=' + user.playlistId);
               return new Promise(function (res) { res(user.playlistId); });
             }, function (err) {
-              console.log('chat.title=' + name + ' Failed to create playlist for user=' + v.id, err);
+              console.log('chat.title=' + name + ' Failed to create playlist for user=' + user.id, err);
               return new Promise(function (res, rej) { rej(err); });
             });
         }
+      }, function (err) {
+        return new Promise(function (res, rej) { rej(err); });
       });
   }
 }
