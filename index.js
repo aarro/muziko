@@ -24,28 +24,35 @@ app.get('/', function (request, response) {
 });
 
 app.get(appSpotifyCallback, function (req, res) {
-  var error = '';
-  var u = _.find(spotifyStateMap, { 'u': req.query.state });
-  if (req.query.code && u) {
-    spotifyApi.resetAccessToken();
-    spotifyApi.resetRefreshToken();
+  if (req && req.query && req.query.state) {
+    var error = '';
+    var u = _.find(spotifyStateMap, { 'u': req.query.state });
 
-    spotifyApi.authorizationCodeGrant(req.query.code)
-      .then(function (data) {
-        var token = data.body;
-        spotifyApi.setAccessToken(token.access_token);
-        spotifyApi.getMe()
-          .then(function (data) {
-            addSpotifyUser(token, data.body, u.id);
-            res.status(200).send('<script>window.close();</script>;');
-          }, function (err) {
-            res.status(404).send(err);
-          });
-      }, function (err) {
-        res.status(404).send(err);
-      });
-  } else {
-    res.status(404).send('User denied access');
+    if (req.query.code && u) {
+      spotifyApi.resetAccessToken();
+      spotifyApi.resetRefreshToken();
+
+      spotifyApi.authorizationCodeGrant(req.query.code)
+        .then(function (data) {
+          var token = data.body;
+          spotifyApi.setAccessToken(token.access_token);
+          spotifyApi.getMe()
+            .then(function (data) {
+              var m = addSpotifyUser(token, data.body, u.id);
+              console.log('Successfully added user=' + data.body.id + ' to spotifyTokenMap for chat.id' + m.chat + '. This spotifyTokenMap entry now has ' + m.users.length + ' users');
+              res.status(200).send('<script>window.close();</script>;');
+            }, function (err) {
+              console.log('Error getting user from Spotify!', err);
+              res.status(404).send(err);
+            });
+        }, function (err) {
+          console.log('Error getting access token from Spotify!', err);
+          res.status(404).send(err);
+        });
+    } else {
+      console.log('User denied Spotify access');
+      res.status(404).send('User denied access');
+    }
   }
 });
 
@@ -66,6 +73,8 @@ function addSpotifyUser(token, user, state) {
   }
   u.access_token = token.access_token;
   u.refresh_token = token.refresh_token;
+
+  return o;
 }
 
 function searchForUserPlaylist(userId, playlistName) {
@@ -75,14 +84,17 @@ function searchForUserPlaylist(userId, playlistName) {
     return spotifyApi.getUserPlaylists(userId, options)
       .then(function (d) {
         var m = _.find(d.body.items, { 'name': playlistName });
-        if (m)
+        if (m) {
+          console.log('user=' + userId + ' found existing playlist=' + m.id);
           return new Promise(function (res) { res(m); });
-        else if (d.body.next) {
+        } else if (d.body.next) {
           options.offset = options.offset + options.limit;
           return search(userId, playlistName, options);
         }
-        else
+        else {
+          console.log('Failed to find existing playlist for user. User=' + userId);
           return new Promise(function (res) { res(undefined); });
+        }
       });
   }
 
@@ -106,8 +118,10 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
   var id = msg.chat.id;
   var name = msg.chat.title;
   var token = _.find(spotifyTokenMap, { 'chat': id });
+  console.log('Found regex match for spotify track. track=' + tid + ' | chat.id=' + id + ' | chat.title=' + name);
 
   if (token) {
+    console.log('chat.title=' + name + ' had ' + token.users.length + ' users registered for the track=' + tid);
     _.forEach(token.users, function (v) {
       spotifyApi.resetAccessToken();
       spotifyApi.resetRefreshToken();
@@ -115,9 +129,10 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
       spotifyApi.setRefreshToken(v.refresh_token);
 
       var promise = new Promise(function (res, ref) {
-        if (v.playlistId)
+        if (v.playlistId) {
+          console.log('chat.title=' + name + ' user=' + v.id + ' already had playlist= ' + v.playlistId + 'cached for the track=' + tid);
           res(v.playlistId);
-        else {
+        } else {
           searchForUserPlaylist(v.id, name)
             .then(function (p) {
               if (p) {
@@ -127,9 +142,10 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
                 spotifyApi.createPlaylist(v.id, name, { 'public': false })
                   .then(function (d) {
                     v.playlistId = d.body.id;
+                    console.log('chat.title=' + name + ' user=' + v.id + ' created playlist=' + v.playlistId + ' for the track=' + tid);
                     res(v.playlistId);
                   }, function (err) {
-                    console.log('Something went wrong!', err);
+                    console.log('chat.title=' + name + ' Failed to create playlist for user=' + v.id, err);
                     rej(err);
                   });
               }
@@ -142,21 +158,25 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
           if (v.playlistId) {
             spotifyApi.addTracksToPlaylist(v.id, v.playlistId, ["spotify:track:" + tid])
               .then(function (data) {
-                console.log('Added tracks to playlist!');
+                console.log('chat.title=' + name + ' user=' + v.id + ' successfully added track=' + tid + ' to playlist=' + v.playlistId);
               }, function (err) {
-                console.log('Something went wrong!', err);
+                console.log('chat.title=' + name + ' user=' + v.id + ' FAILED to add track=' + tid + ' to playlist=' + v.playlistId, err);
               });
+          } else {
+            console.log('chat.title=' + name + ' user=' + v.id + ' playlist was unknown!');
           }
         });
     });
   }
   else {
+    console.log('chat.title=' + name + ' had no users registered for the track=' + tid);
     bot.sendMessage(id, 'I\'m sorry but no one in this chat seems to be registered');
   }
 });
 
 //authenticate the group with spotify.
 bot.onText(/\/auth/, function (msg, match) {
+  console.log('chat.title=' + msg.chat.title + ' requesting auth!');
   var u = uuid();
   var a = spotifyApi.createAuthorizeURL(spotifyScopes, u);// + '&show_dialog=true';
   spotifyStateMap.push({ 'u': u, 'id': msg.chat.id });
