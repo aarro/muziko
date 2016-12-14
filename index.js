@@ -148,7 +148,7 @@ function getPlaylistForChatAndUser(user, name) {
           user.playlistId = p.id;
           return new Promise(function (res) { res(user.playlistId); });
         } else {
-          spotifyApi.createPlaylist(user.id, name, { 'public': false })
+          return spotifyApi.createPlaylist(user.id, name, { 'public': false })
             .then(function (d) {
               user.playlistId = d.body.id;
               console.log('chat.title=' + name + ' user=' + v.id + ' created playlist=' + v.playlistId + ' for the track=' + tid);
