@@ -11,12 +11,7 @@ var app = express();
 var spotifyScopes = ['playlist-modify-public', 'playlist-modify-private', 'playlist-read-private'];
 var spotifyTokenMap = [];
 var spotifyStateMap = [];
-
-var spotifyApi = new SpotifyWebApi({
-  clientId: process.env.spotify_clientId,
-  clientSecret: process.env.spotify_clientSecret,
-  redirectUri: process.env.baseUrl + '/' + process.env.spotify_callback
-});
+var spotifyCreds = { clientId: process.env.spotify_clientId, clientSecret: process.env.spotify_clientSecret };
 
 app.set('port', (process.env.PORT));
 
@@ -29,16 +24,14 @@ app.get('/' + process.env.spotify_callback, function (req, res) {
     var u = _.find(spotifyStateMap, { 'u': req.query.state });
 
     if (req.query.code && u) {
-      spotifyApi.resetAccessToken();
-      spotifyApi.resetRefreshToken();
-
-      spotifyApi.authorizationCodeGrant(req.query.code)
+      var sa = new SpotifyWebApi(spotifyCreds);
+      sa.authorizationCodeGrant(req.query.code)
         .then(function (data) {
           var token = data.body;
-          spotifyApi.setAccessToken(token.access_token);
-          spotifyApi.getMe()
+          sa.setAccessToken(token.access_token);
+          sa.getMe()
             .then(function (data) {
-              var m = addSpotifyUser(token, data.body, u.id);
+              var m = addSpotifyUserToMap(token, data.body, u.id);
               console.log('Successfully added user=' + data.body.id + ' to spotifyTokenMap for chat.id' + m.chat + '. This spotifyTokenMap entry now has ' + m.users.length + ' users');
               res.status(200).send('<script>window.close();</script>;');
             }, function (err) {
@@ -66,9 +59,9 @@ setInterval(function () {
   else if (process.env.baseUrl.startsWith("https://"))
     https.get(process.env.baseUrl);
   else { }
-}, 300000); // every 5 minutes hit the site to keep heroku alive
+}, 600000); // every 10 minutes hit the site to keep heroku alive
 
-function addSpotifyUser(token, user, state) {
+function addSpotifyUserToMap(token, user, state) {
   var o = _.find(spotifyTokenMap, { 'chat': state });
   if (!o) {
     o = { 'chat': state, 'users': [] };
@@ -83,30 +76,31 @@ function addSpotifyUser(token, user, state) {
   return o;
 }
 
-function checkRefreshToken(chatId, userId) {
+//this should set the token for the user for use by subsequent functions/calls
+function setAndRefreshToken(sa, chatId, userId) {
   var c = _.find(spotifyTokenMap, { 'chat': chatId });
   if (c) {
     var u = _.find(c.users, { 'id': userId });
     if (u) {
+      setSpotifyApiTokens(sa, u);
       var n = Date.now();
       //give it 1 minute to make sure the token hasn't expired
       if (n > (u.expires + 60000)) {
-        setSpotifyApiTokens(u);
-        return spotifyApi.refreshAccessToken()
+        return sa.refreshAccessToken()
           .then(function (d) {
             console.log('user=' + userId + ' access token refreshed!');
             setUserTokenMapData(u, d.body);
-            setSpotifyApiTokens(u);
-            return new Promise(function (res) { res(u); });
+            setSpotifyApiTokens(sa, u);
+            return Promise.resolve(u);
           }, function (err) {
-            return new Promise(function (res, rej) { rej(err); });
+            return Promise.reject(err);
           });
       } else {
-        return new Promise(function (res) { res(u); });
+        return Promise.resolve(u);
       }
     }
   }
-  return new Promise(function (res, rej) { rej('user=' + userId + ' not found in chat=' + chatId); });
+  return Promise.reject('user=' + userId + ' not found in chat=' + chatId);
 }
 
 function setUserTokenMapData(user, token) {
@@ -115,66 +109,90 @@ function setUserTokenMapData(user, token) {
   user.expires = Date.now() + (1000 * token.expires_in);
 }
 
-function setSpotifyApiTokens(user) {
-  spotifyApi.resetAccessToken();
-  spotifyApi.resetRefreshToken();
-  spotifyApi.setAccessToken(user.access_token);
-  spotifyApi.setRefreshToken(user.refresh_token);
+function setSpotifyApiTokens(sa, user) {
+  sa.resetAccessToken();
+  sa.resetRefreshToken();
+  sa.setAccessToken(user.access_token);
+  sa.setRefreshToken(user.refresh_token);
 }
 
-function searchForUserPlaylist(userId, playlistName) {
+function searchForUserPlaylist(sa, userId, playlistName) {
   var options = { 'limit': 50, 'offset': 0 };
 
   function search(userId, playlistName, options) {
-    return spotifyApi.getUserPlaylists(userId, options)
+    return sa.getUserPlaylists(userId, options)
       .then(function (d) {
         var m = _.find(d.body.items, { 'name': playlistName });
         if (m) {
           console.log('user=' + userId + ' found existing playlist=' + m.id);
-          return new Promise(function (res) { res(m); });
+          return Promise.resolve(m);
         } else if (d.body.next) {
           options.offset = options.offset + options.limit;
           return search(userId, playlistName, options);
         }
         else {
           console.log('Failed to find existing playlist for user. user=' + userId);
-          return new Promise(function (res) { res(undefined); });
+          return Promise.resolve(undefined);
         }
       }, function (err) {
-        return new Promise(function (res, rej) { rej(err); });
+        return Promise.reject(err);
       });
   }
 
   return search(userId, playlistName, options);
 }
 
-function getPlaylistForChatAndUser(user, name) {
+function getPlaylistForChatAndUser(sa, user, name) {
   if (user.playlistId) {
-    console.log('chat.title=' + name + ' user=' + user.id + ' already had playlist=' + user.playlistId + 'cached.');
-    return new Promise(function (res) { res(user.playlistId); });
+    console.log('chat.title=' + name + ' user=' + user.id + ' already had playlist=' + user.playlistId + ' cached.');
+    return Promise.resolve(user.playlistId);
   } else {
-    return searchForUserPlaylist(user.id, name)
+    return searchForUserPlaylist(sa, user.id, name)
       .then(function (p) {
         if (p) {
           user.playlistId = p.id;
           console.log('Routing found playlist id out of getPlaylistForChatAndUser. user=' + user.id + ' | playlist=' + user.playlistId);
-          return new Promise(function (res) { res(user.playlistId); });
+          return Promise.resolve(user.playlistId);
         } else {
           console.log('Creating a playlist for user=' + user.id);
-          return spotifyApi.createPlaylist(user.id, name, { 'public': false })
+          return sa.createPlaylist(user.id, name, { 'public': false })
             .then(function (d) {
               user.playlistId = d.body.id;
               console.log('chat.title=' + name + ' user=' + user.id + ' created playlist=' + user.playlistId);
-              return new Promise(function (res) { res(user.playlistId); });
+              return Promise.resolve(user.playlistId);
             }, function (err) {
               console.log('chat.title=' + name + ' Failed to create playlist for user=' + user.id, err);
-              return new Promise(function (res, rej) { rej(err); });
+              return Promise.reject(err);
             });
         }
       }, function (err) {
-        return new Promise(function (res, rej) { rej(err); });
+        return Promise.reject(err);
       });
   }
+}
+
+function addTrackToPlaylist(chatId, userId, trackId, chatName) {
+  var sa = new SpotifyWebApi(spotifyCreds);
+  return setAndRefreshToken(sa, chatId, userId)
+    .then(function (u) {
+      return getPlaylistForChatAndUser(sa, u, chatName)
+        .then(function (pid) {
+          return sa.addTracksToPlaylist(userId, pid, ["spotify:track:" + trackId], { 'position': 0 })
+            .then(function (d) {
+              console.log('chat.title=' + chatName + ' user=' + userId + ' successfully added track=' + trackId + ' to playlist=' + pid);
+              return Promise.resolve(d);
+            }, function (err) {
+              console.log('chat.title=' + chatName + ' user=' + userId + ' FAILED to add track=' + trackId + ' to playlist=' + pid, err);
+              return Promise.reject(err);
+            });
+        }, function (err) {
+          console.log('chat.title=' + chatName + ' user=' + userId + ' playlist was unknown!', err);
+          return Promise.reject(err);
+        });
+    }, function (err) {
+      console.log('chat.title=' + chatName + ' user=' + userId + ' failed to refresh token!', err);
+      return Promise.reject(err);
+    });
 }
 
 var telegramToken = process.env.telegram_token;
@@ -199,28 +217,19 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
 
   if (token) {
     console.log('chat.title=' + name + ' had ' + token.users.length + ' users registered for the track=' + tid);
-    _.forEach(token.users, function (v) {
-      checkRefreshToken(id, v.id)
-        .then(function (u) {
-          getPlaylistForChatAndUser(u, name)
-            .then(function (pid) {
-              spotifyApi.addTracksToPlaylist(u.id, pid, ["spotify:track:" + tid], { 'position': 0 })
-                .then(function () {
-                  console.log('chat.title=' + name + ' user=' + u.id + ' successfully added track=' + tid + ' to playlist=' + v.playlistId);
-                }, function (err) {
-                  console.log('chat.title=' + name + ' user=' + u.id + ' FAILED to add track=' + tid + ' to playlist=' + v.playlistId, err);
-                });
-            }, function (err) {
-              console.log('chat.title=' + name + ' user=' + u.id + ' playlist was unknown!', err);
-            });
-        }, function (err) {
-          console.log('chat.title=' + name + ' user=' + v.id + ' failed to refresh token!', err);
-        });
-    });
+    var promises = [];
+    _.forEach(token.users, function (v) { promises.push(addTrackToPlaylist(id, v.id, tid, name)); });
+    Promise.all(promises)
+      .then(function (r) {
+        if (r && r.length > 0)
+          console.log('snapshot=' + r[0].body.snapshot_id);
+      }, function (err) {
+        console.log('Promise.all failed', err);
+      });
   }
   else {
     console.log('chat.title=' + name + ' had no users registered for the track=' + tid);
-    bot.sendMessage(id, 'I\'m sorry but no one in this chat seems to be registered');
+    //bot.sendMessage(id, 'I\'m sorry but no one in this chat seems to be registered');
   }
 });
 
@@ -228,7 +237,9 @@ bot.onText(/https:\/\/open.spotify.com\/track\/(.+)/, function (msg, match) {
 bot.onText(/\/auth/, function (msg) {
   console.log('chat.title=' + msg.chat.title + ' requesting auth!');
   var u = uuid();
-  var a = spotifyApi.createAuthorizeURL(spotifyScopes, u);// + '&show_dialog=true';
+  var sa = new SpotifyWebApi(spotifyCreds);
+  sa.setRedirectURI(process.env.baseUrl + '/' + process.env.spotify_callback);
+  var a = sa.createAuthorizeURL(spotifyScopes, u);// + '&show_dialog=true';
   spotifyStateMap.push({ 'u': u, 'id': msg.chat.id });
   TinyURL.shorten(a, function (res) {
     bot.sendMessage(msg.chat.id, "Please visit the following link to associate your spotify account. " + res);
