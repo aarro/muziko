@@ -5,6 +5,7 @@ var express = require('express');
 var TinyURL = require('tinyurl');
 var uuid = require('uuid/v1');
 var http = require("http");
+var https = require("https");
 var app = express();
 
 var spotifyScopes = ['playlist-modify-public', 'playlist-modify-private', 'playlist-read-private'];
@@ -60,7 +61,11 @@ app.listen(app.get('port'), function () {
 });
 
 setInterval(function () {
-  http.get(process.env.baseUrl);
+  if (process.env.baseUrl.startsWith("http://"))
+    http.get(process.env.baseUrl);
+  else if (process.env.baseUrl.startsWith("https://"))
+    https.get(process.env.baseUrl);
+  else { }
 }, 300000); // every 5 minutes hit the site to keep heroku alive
 
 function addSpotifyUser(token, user, state) {
