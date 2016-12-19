@@ -8,7 +8,7 @@ A telegram bot to add song links to spotify playlists. https://telegram.me/Muzik
 - Spotify token refreshing.
 
 #### Immediate Future
-- Pull a track out of any chat message (better regex...currently the message must only be the track)
+- Prevent duplicate tracks
 - Persistence needed so that when the bot recycles or is updated auth information isn't lost.
 - Proper handling of unhappy path events, such as missing playlist, failed refresh token, bad track, etc
 

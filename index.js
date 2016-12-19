@@ -100,7 +100,7 @@ function setAndRefreshToken(sa, chatId, userId) {
             setSpotifyApiTokens(sa, u);
             return Promise.resolve(u);
           }, function (err) {
-            return Promise.reject('user=' + userId + ' failed to refresh token!', err);
+            return Promise.reject('user=' + userId + ' failed to refresh token! Refresh token is=' + u.refresh_token, err);
           });
       } else {
         console.log('user=' + userId + ' current token is ok');
@@ -112,8 +112,16 @@ function setAndRefreshToken(sa, chatId, userId) {
 }
 
 function setUserTokenMapData(user, token) {
+  console.log('...userId=' + user.id + ' starting setting token data...');
+  for (var p in token) {
+    var v = token[p];
+    console.log(p, v);
+  }
+  console.log('...userId=' + user.id + ' finished setting token data...');
+
   user.access_token = token.access_token;
-  user.refresh_token = token.refresh_token;
+  if (token.refresh_token)
+    user.refresh_token = token.refresh_token;
   user.expires = Date.now() + (1000 * token.expires_in);
 }
 
